@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מחולל QR CODE מקובץ URL</title>
+    <!-- טעינת ספריות חיצוניות דרך CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            background-color: #f4f7f6;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+
+        .actions {
+            margin: 20px 0;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        select {
+            padding: 8px 12px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            background-color: white;
+            cursor: pointer;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+
+        .btn:hover {
+            background-color: #0056b3;
+        }
+
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .btn-download {
+            background-color: #28a745;
+        }
+
+        .btn-download:hover {
+            background-color: #218838;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 25px;
+            display: none;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: right;
+            vertical-align: middle;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .url-text {
+            word-break: break-all;
+            max-width: 250px;
+            font-size: 13px;
+        }
+
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>מחולל קודי QR מקובץ URL</h1>
+        <p style="text-align: center;">העלה קובץ טקסט (.txt) עם כתובת אחת בכל שורה. כל קוד QR יפנה ישירות לדף היעד.</p>
+
+        <div class="actions">
+            <!-- כפתור העלאה -->
+            <label for="fileInput" class="btn" id="uploadLabel">בחר קובץ טקסט</label>
+            <input type="file" id="fileInput" accept=".txt">
+
+            <!-- חלונית בחירת גודל -->
+            <div class="control-group">
+                <label for="sizeSelect" style="font-weight: bold;">גודל קוד מבוקש:</label>
+                <select id="sizeSelect">
+                    <option value="100">100 px (כ-0.8 ס"מ)</option>
+                    <option value="150">150 px (כ-1.2 ס"מ)</option>
+                    <option value="200">200 px (כ-1.7 ס"מ)</option>
+                    <option value="240" selected>240 px (בדיוק 2 ס"מ) - מומלץ</option>
+                    <option value="250">250 px (כ-2.1 ס"מ)</option>
+                    <option value="300">300 px (כ-2.5 ס"מ)</option>
+                </select>
+            </div>
+
+            <!-- כפתור הורדה -->
+            <button id="downloadBtn" class="btn btn-download" disabled>הורד את כל הקודים (ZIP)</button>
+        </div>
+
+        <table id="resultTable">
+            <thead>
+                <tr>
+                    <th>מספר</th>
+                    <th>כתובת (מקודדת ב-QR)</th>
+                    <th style="text-align: center;">QR Code</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const sizeSelect = document.getElementById('sizeSelect');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const resultTable = document.getElementById('resultTable');
+        const tableBody = document.getElementById('tableBody');
+        const uploadLabel = document.getElementById('uploadLabel');
+
+        let currentUrls = [];
+        let generatedQRList = [];
+
+        // האזנה להעלאת קובץ
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const content = e.target.result;
+                currentUrls = content.split(/\r?\n/).map(url => url.trim()).filter(url => url.length > 0);
+
+                if (currentUrls.length === 0) {
+                    alert('הקובץ ריק או שאינו מכיל כתובות תקינות.');
+                    return;
+                }
+
+                // חסימת כפתור העלאה בזמן העיבוד ברשת
+                uploadLabel.style.backgroundColor = '#cccccc';
+                uploadLabel.style.pointerEvents = 'none';
+                uploadLabel.textContent = 'מייצר קודי QR...';
+
+                generateQRTable().then(() => {
+                    // שחרור כפתור העלאה בסיום מוצלח
+                    uploadLabel.style.backgroundColor = '#007bff';
+                    uploadLabel.style.pointerEvents = 'auto';
+                    uploadLabel.textContent = 'בחר קובץ טקסט';
+
+                    // הודעת התראה למשתמש והצעת הורדה
+                    setTimeout(() => {
+                        alert(`התהליך הסתיים בהצלחה!\nנוצרו ${currentUrls.length} קודי QR מותאמים.\nלחץ על כפתור "הורד את כל הקודים (ZIP)" כדי לשמור אותם במחשב.`);
+                    }, 300);
+                });
+            };
+            reader.readAsText(file);
+        });
+
+        // האזנה לשינוי גודל דינמי
+        sizeSelect.addEventListener('change', function () {
+            if (currentUrls.length > 0) {
+                redrawQRCodes();
+            }
+        });
+
+        function generateQRTable() {
+            tableBody.innerHTML = '';
+            generatedQRList = [];
+            downloadBtn.disabled = true;
+            resultTable.style.display = 'table';
+
+            const qrSize = parseInt(sizeSelect.value, 10);
+
+            for (let index = 0; index < currentUrls.length; index++) {
+                const url = currentUrls[index];
+                const row = document.createElement('tr');
+
+                const numCell = document.createElement('td');
+                numCell.textContent = index + 1;
+                row.appendChild(numCell);
+
+                const urlCell = document.createElement('td');
+                urlCell.className = 'url-text';
+                urlCell.textContent = url;
+                row.appendChild(urlCell);
+
+                const qrCell = document.createElement('td');
+                const canvas = document.createElement('canvas');
+                canvas.id = `canvas-${index}`;
+                qrCell.appendChild(canvas);
+                row.appendChild(qrCell);
+
+                tableBody.appendChild(row);
+
+                QRCode.toCanvas(canvas, url, { width: qrSize, margin: 2, errorCorrectionLevel: 'M' }, function (error) {
+                    if (error) console.error(error);
+                });
+
+                generatedQRList.push({
+                    canvas: canvas,
+                    url: url,
+                    filename: `qr_${index + 1}.png`
+                });
+            }
+
+            downloadBtn.disabled = false;
+            return Promise.resolve();
+        }
+
+        // פונקציה מהירה לציור מחדש רק של קודי ה-QR
+        function redrawQRCodes() {
+            const qrSize = parseInt(sizeSelect.value, 10);
+
+            generatedQRList.forEach((item, index) => {
+                const canvas = document.getElementById(`canvas-${index}`);
+                const urlToEncode = item.url;
+
+                QRCode.toCanvas(canvas, urlToEncode, { width: qrSize, margin: 2, errorCorrectionLevel: 'M' }, function (error) {
+                    if (error) console.error(error);
+                });
+            });
+        }
+
+        // פונקציית הורדת ה-ZIP
+        downloadBtn.addEventListener('click', function () {
+            if (generatedQRList.length === 0) return;
+
+            const zip = new JSZip();
+
+            generatedQRList.forEach(item => {
+                const dataUrl = item.canvas.toDataURL('image/png');
+                const base64Data = dataUrl.split(',')[1];
+                zip.file(item.filename, base64Data, { base64: true });
+            });
+
+            zip.generateAsync({ type: 'blob' }).then(function (content) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `qr_codes_${sizeSelect.value}px.zip`;
+                link.click();
+                URL.revokeObjectURL(link.href);
+            });
+        });
+    </script>
+
+</body>
+
+</html>

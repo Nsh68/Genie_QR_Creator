@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מחולל QR לטבלה — Phase 2</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            background-color: #f4f7f6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+
+        .actions {
+            margin: 20px 0;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        select {
+            padding: 8px 12px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            background-color: white;
+            cursor: pointer;
+            max-width: 220px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+
+        .btn:hover {
+            background-color: #0056b3;
+        }
+
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .btn-download {
+            background-color: #28a745;
+        }
+
+        .btn-download:hover {
+            background-color: #218838;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+            margin-top: 25px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            display: none;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: right;
+            vertical-align: middle;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        td.cell-text {
+            word-break: break-word;
+            max-width: 280px;
+            font-size: 13px;
+        }
+
+        td.qr-cell {
+            text-align: center;
+            min-width: 120px;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+        }
+
+        .hint {
+            text-align: center;
+            color: #555;
+            margin-top: 8px;
+        }
+
+        #urlColumnSelect:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>מחולל QR לטבלה — Phase 2</h1>
+        <p class="hint">העלי קובץ Excel (.xlsx) או CSV (.csv). בחרי את עמודת ה-URL — שאר העמודות יישמרו כפי שהן, ותתווסף
+            עמודת QR CODES.</p>
+
+        <div class="actions">
+            <label for="fileInput" class="btn" id="uploadLabel">בחר קובץ טבלה</label>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+
+            <div class="control-group">
+                <label for="urlColumnSelect" style="font-weight: bold;">עמודת URL:</label>
+                <select id="urlColumnSelect" disabled>
+                    <option value="">— העלי קובץ תחילה —</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="sizeSelect" style="font-weight: bold;">גודל QR:</label>
+                <select id="sizeSelect">
+                    <option value="80">80 px</option>
+                    <option value="100">100 px</option>
+                    <option value="120" selected>120 px</option>
+                    <option value="150">150 px</option>
+                    <option value="200">200 px</option>
+                </select>
+            </div>
+
+            <button id="downloadBtn" class="btn btn-download" disabled>הורד טבלה עם QR (Excel)</button>
+        </div>
+
+        <div class="table-wrap">
+            <table id="resultTable">
+                <thead id="tableHead"></thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const sizeSelect = document.getElementById('sizeSelect');
+        const urlColumnSelect = document.getElementById('urlColumnSelect');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const resultTable = document.getElementById('resultTable');
+        const tableHead = document.getElementById('tableHead');
+        const tableBody = document.getElementById('tableBody');
+        const uploadLabel = document.getElementById('uploadLabel');
+
+        const QR_COLUMN_TITLE = 'QR CODES';
+
+        let sheetRows = [];
+        let headers = [];
+        let urlColumnIndex = 0;
+        let qrCanvases = [];
+
+        function normalizeUrl(value) {
+            const s = String(value).trim();
+            if (!s) return '';
+            if (/^https?:\/\//i.test(s)) return s;
+            if (/^www\./i.test(s)) return 'https://' + s;
+            if (/^[a-z0-9][-a-z0-9.]*\.[a-z]{2,}/i.test(s)) return 'https://' + s;
+            return s;
+        }
+
+        function isLikelyUrl(value) {
+            if (value == null) return false;
+            const normalized = normalizeUrl(value);
+            return /^https?:\/\//i.test(normalized);
+        }
+
+        function detectUrlColumn(rows, headerRow) {
+            const colCount = headerRow.length;
+            let bestCol = 0;
+            let bestScore = -1;
+
+            for (let c = 0; c < colCount; c++) {
+                let score = 0;
+                const header = String(headerRow[c] || '').toLowerCase();
+                if (header.includes('url') || header.includes('link') || header.includes('כתובת') || header.includes('קישור')) {
+                    score += 5;
+                }
+                for (let r = 1; r < rows.length; r++) {
+                    if (isLikelyUrl(rows[r][c])) score++;
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestCol = c;
+                }
+            }
+            return bestCol;
+        }
+
+        function populateUrlColumnSelect() {
+            urlColumnSelect.innerHTML = '';
+            headers.forEach((h, i) => {
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = h ? `${h} (עמודה ${i + 1})` : `עמודה ${i + 1}`;
+                urlColumnSelect.appendChild(opt);
+            });
+            urlColumnSelect.value = String(urlColumnIndex);
+            urlColumnSelect.disabled = false;
+        }
+
+        function parseWorkbook(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const sheet = workbook.Sheets[sheetName];
+                        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                        resolve(rows);
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function qrToCanvas(url, size) {
+            return new Promise((resolve, reject) => {
+                const canvas = document.createElement('canvas');
+                QRCode.toCanvas(canvas, url, { width: size, margin: 2, errorCorrectionLevel: 'M' }, (err) => {
+                    if (err) reject(err);
+                    else resolve(canvas);
+                });
+            });
+        }
+
+        async function buildTable() {
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            qrCanvases = [];
+            downloadBtn.disabled = true;
+
+            if (sheetRows.length < 1) return;
+
+            headers = sheetRows[0].map((h) => (h == null ? '' : String(h)));
+            const displayHeaders = [...headers, QR_COLUMN_TITLE];
+
+            const headRow = document.createElement('tr');
+            displayHeaders.forEach((h) => {
+                const th = document.createElement('th');
+                th.textContent = h;
+                headRow.appendChild(th);
+            });
+            tableHead.appendChild(headRow);
+
+            const qrSize = parseInt(sizeSelect.value, 10);
+            const dataRows = sheetRows.slice(1);
+
+            for (let r = 0; r < dataRows.length; r++) {
+                const rowData = dataRows[r];
+                const tr = document.createElement('tr');
+
+                headers.forEach((_, c) => {
+                    const td = document.createElement('td');
+                    td.className = 'cell-text';
+                    const val = rowData[c];
+                    td.textContent = val == null ? '' : String(val);
+                    tr.appendChild(td);
+                });
+
+                const qrTd = document.createElement('td');
+                qrTd.className = 'qr-cell';
+                const url = normalizeUrl(rowData[urlColumnIndex]);
+
+                if (url && isLikelyUrl(url)) {
+                    try {
+                        const canvas = await qrToCanvas(url, qrSize);
+                        canvas.dataset.rowIndex = String(r);
+                        qrTd.appendChild(canvas);
+                        qrCanvases.push({ canvas, url, rowIndex: r });
+                    } catch (e) {
+                        qrTd.textContent = 'שגיאה ב-QR';
+                        console.error(e);
+                    }
+                } else {
+                    qrTd.textContent = '—';
+                }
+                tr.appendChild(qrTd);
+                tableBody.appendChild(tr);
+            }
+
+            resultTable.style.display = 'table';
+            downloadBtn.disabled = qrCanvases.length === 0;
+        }
+
+        async function regenerateQRCodes() {
+            if (sheetRows.length < 2) return;
+            uploadLabel.style.backgroundColor = '#cccccc';
+            uploadLabel.style.pointerEvents = 'none';
+            uploadLabel.textContent = 'מייצר קודי QR...';
+            urlColumnIndex = parseInt(urlColumnSelect.value, 10);
+            await buildTable();
+            uploadLabel.style.backgroundColor = '#007bff';
+            uploadLabel.style.pointerEvents = 'auto';
+            uploadLabel.textContent = 'בחר קובץ טבלה';
+        }
+
+        fileInput.addEventListener('change', async function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            uploadLabel.style.backgroundColor = '#cccccc';
+            uploadLabel.style.pointerEvents = 'none';
+            uploadLabel.textContent = 'קורא קובץ...';
+
+            try {
+                sheetRows = await parseWorkbook(file);
+                if (sheetRows.length < 2) {
+                    alert('הקובץ חייב להכיל שורת כותרות ולפחות שורת נתונים אחת.');
+                    return;
+                }
+
+                headers = sheetRows[0].map((h) => (h == null ? '' : String(h)));
+                urlColumnIndex = detectUrlColumn(sheetRows, sheetRows[0]);
+                populateUrlColumnSelect();
+                await regenerateQRCodes();
+
+                setTimeout(() => {
+                    alert(`הטבלה נטענה.\nנוצרו קודי QR לשורות עם כתובת URL תקינה.\nלחצי "הורד טבלה עם QR (Excel)" לשמירה.`);
+                }, 300);
+            } catch (err) {
+                console.error(err);
+                alert('שגיאה בקריאת הקובץ. ודאי שהקובץ הוא Excel (.xlsx) או CSV (.csv).');
+            } finally {
+                uploadLabel.style.backgroundColor = '#007bff';
+                uploadLabel.style.pointerEvents = 'auto';
+                uploadLabel.textContent = 'בחר קובץ טבלה';
+            }
+        });
+
+        urlColumnSelect.addEventListener('change', () => {
+            if (sheetRows.length > 0) regenerateQRCodes();
+        });
+
+        sizeSelect.addEventListener('change', () => {
+            if (sheetRows.length > 0) regenerateQRCodes();
+        });
+
+        downloadBtn.addEventListener('click', async function () {
+            if (qrCanvases.length === 0) return;
+
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet('טבלה עם QR');
+            const exportHeaders = [...headers, QR_COLUMN_TITLE];
+            sheet.addRow(exportHeaders);
+
+            const dataRows = sheetRows.slice(1);
+            const qrSize = parseInt(sizeSelect.value, 10);
+            const qrColIndex = headers.length;
+
+            for (let r = 0; r < dataRows.length; r++) {
+                const rowValues = headers.map((_, c) => {
+                    const v = dataRows[r][c];
+                    return v == null ? '' : v;
+                });
+                rowValues.push('');
+                const excelRow = sheet.addRow(rowValues);
+                excelRow.height = Math.max(60, qrSize * 0.75);
+
+                const url = normalizeUrl(dataRows[r][urlColumnIndex]);
+                const qrItem = qrCanvases.find((q) => q.rowIndex === r);
+
+                if (qrItem && url) {
+                    const base64 = qrItem.canvas.toDataURL('image/png').split(',')[1];
+                    const imageId = workbook.addImage({
+                        base64: base64,
+                        extension: 'png',
+                    });
+                    sheet.addImage(imageId, {
+                        tl: { col: qrColIndex, row: r + 1 },
+                        ext: { width: qrSize, height: qrSize },
+                    });
+                }
+            }
+
+            exportHeaders.forEach((_, i) => {
+                sheet.getColumn(i + 1).width = i === qrColIndex ? 18 : 22;
+            });
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'table_with_qr_codes.xlsx';
+            link.click();
+            URL.revokeObjectURL(link.href);
+        });
+    </script>
+
+</body>
+
+</html>
