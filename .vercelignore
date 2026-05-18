@@ -1,0 +1,11 @@
+*.xlsx
+*.xls
+*.csv
+*.zip
+*.docx
+*.doc
+~$*
+ASSET/table_with_qr*
+ASSET/gemini-code*
+ASSET/Gemini_Generated*
+נסיון.txt
