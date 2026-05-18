@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Genie — מחולל QR לטבלה</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            margin: 0;
+            padding: 24px 16px 40px;
+            background-color: #f4f7f6;
+            color: #1e293b;
+            min-height: 100vh;
+        }
+
+        .page-shell {
+            max-width: min(100%, 1280px);
+            margin: 0 auto;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 0.4fr 0.6fr;
+            align-items: stretch;
+            gap: 0;
+            background: #fff;
+            border-radius: 20px;
+            box-shadow: 0 12px 40px rgba(15, 23, 42, 0.1);
+            overflow: hidden;
+        }
+
+        .visual-side {
+            position: relative;
+            min-height: 100%;
+            border-inline-start: 1px solid #e2e8f0;
+            background-color: #eef6ff;
+            background-image: url('ASSET/GINI.jpg');
+            background-repeat: no-repeat;
+            background-position: center bottom;
+            background-size: cover;
+            overflow: hidden;
+        }
+
+        .visual-side::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                to bottom,
+                rgba(255, 255, 255, 0.92) 0%,
+                rgba(255, 255, 255, 0.55) 22%,
+                rgba(255, 255, 255, 0.08) 45%,
+                transparent 65%
+            );
+            pointer-events: none;
+        }
+
+        .visual-content {
+            position: relative;
+            z-index: 1;
+            padding: 36px 28px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            min-height: 520px;
+        }
+
+        .visual-side h1 {
+            margin: 0 0 8px;
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: #0f172a;
+        }
+
+        .visual-side .tagline {
+            margin: 0;
+            font-size: 0.95rem;
+            color: #475569;
+        }
+
+        .form-side {
+            padding: 28px 24px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .form-side .intro {
+            margin: 0;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #475569;
+        }
+
+        .step {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 0.92rem;
+            color: #0f172a;
+        }
+
+        .step-num {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #3b82f6;
+            color: #fff;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .drop-zone {
+            border: 2px dashed #3b82f6;
+            background: #f0f6ff;
+            border-radius: 12px;
+            padding: 14px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, transform 0.15s;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.drag-over {
+            background: #e0edff;
+            border-color: #2563eb;
+        }
+
+        .drop-zone.processing {
+            pointer-events: none;
+            opacity: 0.75;
+            cursor: wait;
+        }
+
+        .drop-zone .zone-title {
+            font-weight: 700;
+            color: #1e40af;
+            margin-bottom: 4px;
+        }
+
+        .drop-zone .zone-hint {
+            font-size: 0.88rem;
+            color: #64748b;
+        }
+
+        .drop-zone .zone-file {
+            margin-top: 10px;
+            font-size: 0.82rem;
+            color: #059669;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .field-select {
+            width: 100%;
+            padding: 9px 12px;
+            font-size: 0.92rem;
+            border-radius: 10px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #0f172a;
+            cursor: pointer;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .field-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .field-select:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            background: #f8fafc;
+        }
+
+        .btn-download {
+            width: 100%;
+            margin: 0;
+            padding: 10px 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: #fff;
+            cursor: pointer;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35);
+            transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+        }
+
+        .btn-download:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 28px rgba(16, 185, 129, 0.45);
+        }
+
+        .btn-download:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn-download:disabled {
+            background: #cbd5e1;
+            box-shadow: none;
+            cursor: not-allowed;
+            opacity: 0.85;
+        }
+
+        .format-notice {
+            margin: 0;
+            padding: 8px 10px;
+            background: #eff6ff;
+            border: 1px solid #93c5fd;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            line-height: 1.45;
+            color: #1e3a5f;
+        }
+
+        .format-notice strong {
+            color: #1d4ed8;
+        }
+
+        .download-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .results-section {
+            margin-top: 28px;
+            background: #fff;
+            border-radius: 20px;
+            box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+            padding: 24px;
+        }
+
+        .results-section h2 {
+            margin: 0 0 16px;
+            font-size: 1.1rem;
+            color: #0f172a;
+        }
+
+        .table-wrap {
+            overflow: visible;
+        }
+
+        #resultTable {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+            display: none;
+        }
+
+        th,
+        td {
+            border: 1px solid #e2e8f0;
+            padding: 8px;
+            text-align: right;
+            vertical-align: middle;
+        }
+
+        th {
+            background-color: #f8fafc;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        #resultTable th.col-text,
+        #resultTable td.cell-text {
+            width: auto;
+            max-width: 7.5rem;
+            word-wrap: break-word;
+            overflow-wrap: anywhere;
+            white-space: normal;
+            font-size: 0.75rem;
+            line-height: 1.35;
+        }
+
+        #resultTable th.col-qr,
+        #resultTable td.qr-cell {
+            width: var(--qr-col-width, 140px);
+            min-width: var(--qr-col-width, 140px);
+            max-width: var(--qr-col-width, 140px);
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        td.qr-cell canvas {
+            display: block;
+            margin: 0 auto;
+        }
+
+        @media (max-width: 820px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .visual-side {
+                border-inline-start: none;
+                border-bottom: 1px solid #e2e8f0;
+                min-height: 380px;
+            }
+
+            .visual-content {
+                min-height: 380px;
+                padding: 28px 20px 0;
+            }
+
+            .form-side {
+                padding: 28px 20px;
+            }
+
+            .download-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="page-shell">
+        <div class="dashboard">
+            <aside class="visual-side" aria-label="אזור ויזואלי">
+                <div class="visual-content">
+                    <h1>QR Genie</h1>
+                    <p class="tagline">הג'יני שלך ליצירת קודי QR מטבלאות</p>
+                </div>
+            </aside>
+
+            <section class="form-side">
+                <p class="intro">בחרו את עמודת ה-CSV או Excel המכילה את ה-URL, העלו קובץ — ותקבלו טבלה עם קודי QR מוטמעים.</p>
+
+                <div class="step">
+                    <div class="step-header">
+                        <span class="step-num">1</span>
+                        <span>העלאת הטבלה</span>
+                    </div>
+                    <label for="fileInput" class="drop-zone" id="dropZone">
+                        <div class="zone-title" id="dropZoneTitle">לחצו לבחירת קובץ אקסל או CSV</div>
+                        <div class="zone-hint">או גררו את הקובץ לכאן</div>
+                        <div class="zone-file" id="dropZoneFile"></div>
+                    </label>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <span class="step-num">2</span>
+                        <span>בחירת עמודת ה-URL</span>
+                    </div>
+                    <select id="urlColumnSelect" class="field-select" disabled>
+                        <option value="">— העלי קובץ תחילה —</option>
+                    </select>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <span class="step-num">3</span>
+                        <span>גודל קוד ה-QR</span>
+                    </div>
+                    <select id="sizeSelect" class="field-select">
+                        <option value="80">קטן (80px)</option>
+                        <option value="100">קטן-בינוני (100px)</option>
+                        <option value="120">בינוני (120px)</option>
+                        <option value="150">גדול (150px)</option>
+                        <option value="200">גדול מאוד (200px)</option>
+                        <option value="250" selected>בינוני מומלץ (250px)</option>
+                    </select>
+                </div>
+
+                <p class="format-notice">
+                    <strong>שימו לב:</strong> בקבצי Excel קודי ה-QR עשויים לחפוף חלקית זה לזה; בקבצי HTML הם מוצגים בתוך התאים בצורה מדויקת יותר.
+                    בתחתית הדף מופיעים קודי ה-QR שנוצרו. לאחר העלאת הקובץ תוכלו להוריד כל פורמט בנפרד ולבחור את התוצר המתאים לכם.
+                </p>
+
+                <div class="download-actions">
+                    <button id="downloadExcelBtn" class="btn-download" disabled>הורד Excel (.xlsx)</button>
+                    <button id="downloadHtmlBtn" class="btn-download" disabled>הורד HTML (.html)</button>
+                </div>
+            </section>
+        </div>
+
+        <section class="results-section" id="resultsSection" style="display: none;">
+            <h2>תוצאות הטבלה</h2>
+            <div class="table-wrap">
+                <table id="resultTable">
+                    <thead id="tableHead"></thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const sizeSelect = document.getElementById('sizeSelect');
+        const urlColumnSelect = document.getElementById('urlColumnSelect');
+        const downloadExcelBtn = document.getElementById('downloadExcelBtn');
+        const downloadHtmlBtn = document.getElementById('downloadHtmlBtn');
+        const resultTable = document.getElementById('resultTable');
+        const tableHead = document.getElementById('tableHead');
+        const tableBody = document.getElementById('tableBody');
+        const dropZone = document.getElementById('dropZone');
+        const dropZoneTitle = document.getElementById('dropZoneTitle');
+        const dropZoneFile = document.getElementById('dropZoneFile');
+        const resultsSection = document.getElementById('resultsSection');
+
+        const QR_COLUMN_TITLE = 'QR CODES';
+
+        let sheetRows = [];
+        let headers = [];
+        let urlColumnIndex = 0;
+        let qrCanvases = [];
+
+        function setDropZoneProcessing(isProcessing, title) {
+            dropZone.classList.toggle('processing', isProcessing);
+            if (title) dropZoneTitle.textContent = title;
+        }
+
+        function setDropZoneIdle(fileName) {
+            dropZone.classList.remove('processing');
+            dropZoneTitle.textContent = fileName ? 'החליפו קובץ' : 'לחצו לבחירת קובץ אקסל או CSV';
+            dropZoneFile.textContent = fileName || '';
+        }
+
+        function setDownloadButtonsEnabled(enabled) {
+            downloadExcelBtn.disabled = !enabled;
+            downloadHtmlBtn.disabled = !enabled;
+        }
+
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function triggerDownload(blob, filename) {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        function normalizeUrl(value) {
+            const s = String(value).trim();
+            if (!s) return '';
+            if (/^https?:\/\//i.test(s)) return s;
+            if (/^www\./i.test(s)) return 'https://' + s;
+            if (/^[a-z0-9][-a-z0-9.]*\.[a-z]{2,}/i.test(s)) return 'https://' + s;
+            return s;
+        }
+
+        function isLikelyUrl(value) {
+            if (value == null) return false;
+            const normalized = normalizeUrl(value);
+            return /^https?:\/\//i.test(normalized);
+        }
+
+        function detectUrlColumn(rows, headerRow) {
+            const colCount = headerRow.length;
+            let bestCol = 0;
+            let bestScore = -1;
+
+            for (let c = 0; c < colCount; c++) {
+                let score = 0;
+                const header = String(headerRow[c] || '').toLowerCase();
+                if (header.includes('url') || header.includes('link') || header.includes('כתובת') || header.includes('קישור')) {
+                    score += 5;
+                }
+                for (let r = 1; r < rows.length; r++) {
+                    if (isLikelyUrl(rows[r][c])) score++;
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestCol = c;
+                }
+            }
+            return bestCol;
+        }
+
+        function populateUrlColumnSelect() {
+            urlColumnSelect.innerHTML = '';
+            headers.forEach((h, i) => {
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = h ? `${h} (עמודה ${i + 1})` : `עמודה ${i + 1}`;
+                urlColumnSelect.appendChild(opt);
+            });
+            urlColumnSelect.value = String(urlColumnIndex);
+            urlColumnSelect.disabled = false;
+        }
+
+        function parseWorkbook(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const sheet = workbook.Sheets[sheetName];
+                        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                        resolve(rows);
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function qrToCanvas(url, size) {
+            return new Promise((resolve, reject) => {
+                const canvas = document.createElement('canvas');
+                QRCode.toCanvas(canvas, url, { width: size, margin: 2, errorCorrectionLevel: 'M' }, (err) => {
+                    if (err) reject(err);
+                    else resolve(canvas);
+                });
+            });
+        }
+
+        async function buildTable() {
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            qrCanvases = [];
+            setDownloadButtonsEnabled(false);
+
+            if (sheetRows.length < 1) return;
+
+            headers = sheetRows[0].map((h) => (h == null ? '' : String(h)));
+            const displayHeaders = [...headers, QR_COLUMN_TITLE];
+            const qrSize = parseInt(sizeSelect.value, 10);
+            resultTable.style.setProperty('--qr-col-width', (qrSize + 32) + 'px');
+
+            const headRow = document.createElement('tr');
+            displayHeaders.forEach((h, i) => {
+                const th = document.createElement('th');
+                th.textContent = h;
+                th.className = i < headers.length ? 'col-text' : 'col-qr';
+                headRow.appendChild(th);
+            });
+            tableHead.appendChild(headRow);
+
+            const dataRows = sheetRows.slice(1);
+
+            for (let r = 0; r < dataRows.length; r++) {
+                const rowData = dataRows[r];
+                const tr = document.createElement('tr');
+
+                headers.forEach((_, c) => {
+                    const td = document.createElement('td');
+                    td.className = 'cell-text';
+                    const val = rowData[c];
+                    td.textContent = val == null ? '' : String(val);
+                    tr.appendChild(td);
+                });
+
+                const qrTd = document.createElement('td');
+                qrTd.className = 'qr-cell';
+                const url = normalizeUrl(rowData[urlColumnIndex]);
+
+                if (url && isLikelyUrl(url)) {
+                    try {
+                        const canvas = await qrToCanvas(url, qrSize);
+                        canvas.dataset.rowIndex = String(r);
+                        qrTd.appendChild(canvas);
+                        qrCanvases.push({ canvas, url, rowIndex: r });
+                    } catch (e) {
+                        qrTd.textContent = 'שגיאה ב-QR';
+                        console.error(e);
+                    }
+                } else {
+                    qrTd.textContent = '—';
+                }
+                tr.appendChild(qrTd);
+                tableBody.appendChild(tr);
+            }
+
+            resultTable.style.display = 'table';
+            resultsSection.style.display = 'block';
+            setDownloadButtonsEnabled(qrCanvases.length > 0);
+        }
+
+        async function regenerateQRCodes() {
+            if (sheetRows.length < 2) return;
+            setDropZoneProcessing(true, 'מייצר קודי QR...');
+            urlColumnIndex = parseInt(urlColumnSelect.value, 10);
+            await buildTable();
+            setDropZoneIdle(dropZoneFile.textContent);
+        }
+
+        async function handleFile(file) {
+            if (!file) return;
+
+            setDropZoneProcessing(true, 'קורא קובץ...');
+
+            try {
+                sheetRows = await parseWorkbook(file);
+                if (sheetRows.length < 2) {
+                    alert('הקובץ חייב להכיל שורת כותרות ולפחות שורת נתונים אחת.');
+                    setDropZoneIdle('');
+                    return;
+                }
+
+                headers = sheetRows[0].map((h) => (h == null ? '' : String(h)));
+                urlColumnIndex = detectUrlColumn(sheetRows, sheetRows[0]);
+                populateUrlColumnSelect();
+                dropZoneFile.textContent = file.name;
+                await regenerateQRCodes();
+
+                setTimeout(() => {
+                    alert(`הטבלה נטענה.\nנוצרו קודי QR לשורות עם כתובת URL תקינה.\nהורידי Excel או HTML — כל לחיצה מורידה קובץ אחד.`);
+                }, 300);
+            } catch (err) {
+                console.error(err);
+                alert('שגיאה בקריאת הקובץ. ודאי שהקובץ הוא Excel (.xlsx) או CSV (.csv).');
+                setDropZoneIdle('');
+            }
+        }
+
+        fileInput.addEventListener('change', async function (e) {
+            const file = e.target.files[0];
+            await handleFile(file);
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                fileInput.files = e.dataTransfer.files;
+                await handleFile(file);
+            }
+        });
+
+        urlColumnSelect.addEventListener('change', () => {
+            if (sheetRows.length > 0) regenerateQRCodes();
+        });
+
+        sizeSelect.addEventListener('change', () => {
+            if (sheetRows.length > 0) regenerateQRCodes();
+        });
+
+        downloadHtmlBtn.addEventListener('click', function () {
+            if (qrCanvases.length === 0) return;
+
+            const qrSize = parseInt(sizeSelect.value, 10);
+            const dataRows = sheetRows.slice(1);
+            const displayHeaders = [...headers, QR_COLUMN_TITLE];
+
+            const qrColWidth = qrSize + 32;
+            let bodyHtml = '';
+            for (let r = 0; r < dataRows.length; r++) {
+                const rowData = dataRows[r];
+                let cells = headers.map((_, c) => {
+                    const val = rowData[c];
+                    return `<td class="cell-text">${escapeHtml(val == null ? '' : val)}</td>`;
+                }).join('');
+
+                const qrItem = qrCanvases.find((q) => q.rowIndex === r);
+                if (qrItem) {
+                    const src = qrItem.canvas.toDataURL('image/png');
+                    cells += `<td class="qr-cell"><img src="${src}" width="${qrSize}" height="${qrSize}" alt="QR"></td>`;
+                } else {
+                    cells += '<td class="qr-cell">—</td>';
+                }
+                bodyHtml += `<tr>${cells}</tr>`;
+            }
+
+            const headHtml = displayHeaders.map((h, i) => {
+                const cls = i < headers.length ? 'col-text' : 'col-qr';
+                return `<th class="${cls}">${escapeHtml(h)}</th>`;
+            }).join('');
+            const html = `<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>טבלה עם קודי QR</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 24px; background: #f4f7f6; }
+h1 { text-align: center; color: #0f172a; font-size: 1.25rem; }
+table { width: 100%; table-layout: fixed; border-collapse: collapse; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: right; vertical-align: middle; }
+th { background: #f8fafc; }
+th.col-text, td.cell-text { word-wrap: break-word; overflow-wrap: anywhere; white-space: normal; font-size: 0.75rem; line-height: 1.35; max-width: 7.5rem; }
+th.col-qr, td.qr-cell { width: ${qrColWidth}px; min-width: ${qrColWidth}px; max-width: ${qrColWidth}px; text-align: center; white-space: nowrap; }
+td.qr-cell img { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<h1>טבלה עם קודי QR</h1>
+<table>
+<thead><tr>${headHtml}</tr></thead>
+<tbody>${bodyHtml}</tbody>
+</table>
+</body>
+</html>`;
+
+            triggerDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), 'table_with_qr_codes.html');
+        });
+
+        downloadExcelBtn.addEventListener('click', async function () {
+            if (qrCanvases.length === 0) return;
+
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet('טבלה עם QR');
+            const exportHeaders = [...headers, QR_COLUMN_TITLE];
+            sheet.addRow(exportHeaders);
+
+            const dataRows = sheetRows.slice(1);
+            const qrSize = parseInt(sizeSelect.value, 10);
+            const qrColIndex = headers.length;
+
+            const imgSize = qrSize;
+            const padPx = 12;
+            const cellSidePx = imgSize + padPx * 2;
+            const textColWidthChars = Math.max(10, Math.min(14, Math.floor(72 / Math.max(headers.length, 1))));
+
+            // תא מרובע: קודם קובעים מידות, אחר כך ממרכזים את ה-QR בתוכו
+            const rowHeightPoints = Math.max(60, Math.ceil((cellSidePx * 72) / 96) + 4);
+            const qrColWidthChars = Math.max(12, Math.ceil((cellSidePx - 5) / 7));
+            const cellWidthPx = qrColWidthChars * 7 + 5;
+            const cellHeightPx = (rowHeightPoints * 96) / 72;
+            const offsetColFrac = Math.max(0, (cellWidthPx - imgSize) / (2 * cellWidthPx));
+            const offsetRowFrac = Math.max(0, (cellHeightPx - imgSize) / (2 * cellHeightPx));
+
+            exportHeaders.forEach((_, i) => {
+                sheet.getColumn(i + 1).width = i === qrColIndex ? qrColWidthChars : textColWidthChars;
+            });
+
+            const headerRow = sheet.getRow(1);
+            headerRow.height = 28;
+            for (let c = 1; c <= headers.length; c++) {
+                headerRow.getCell(c).alignment = { wrapText: true, vertical: 'middle' };
+            }
+            headerRow.getCell(qrColIndex + 1).alignment = { vertical: 'middle', horizontal: 'center' };
+
+            for (let r = 0; r < dataRows.length; r++) {
+                const rowValues = headers.map((_, c) => {
+                    const v = dataRows[r][c];
+                    return v == null ? '' : v;
+                });
+                rowValues.push('');
+                const excelRow = sheet.addRow(rowValues);
+                const rowAnchor = excelRow.number - 1;
+                excelRow.height = rowHeightPoints;
+
+                for (let c = 1; c <= headers.length; c++) {
+                    excelRow.getCell(c).alignment = { wrapText: true, vertical: 'middle' };
+                }
+                const qrCell = excelRow.getCell(qrColIndex + 1);
+                qrCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+                const url = normalizeUrl(dataRows[r][urlColumnIndex]);
+                const qrItem = qrCanvases.find((q) => q.rowIndex === r);
+
+                if (qrItem && url) {
+                    const base64 = qrItem.canvas.toDataURL('image/png').split(',')[1];
+                    const imageId = workbook.addImage({
+                        base64: base64,
+                        extension: 'png',
+                    });
+                    sheet.addImage(imageId, {
+                        tl: { col: qrColIndex + offsetColFrac, row: rowAnchor + offsetRowFrac },
+                        ext: { width: imgSize, height: imgSize },
+                        editAs: 'oneCell',
+                    });
+                }
+            }
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            triggerDownload(blob, 'table_with_qr_codes.xlsx');
+        });
+    </script>
+
+</body>
+
+</html>
