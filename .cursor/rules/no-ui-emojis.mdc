@@ -1,0 +1,32 @@
+---
+description: Never use emoji or decorative icons in UI code for this user
+alwaysApply: true
+---
+
+# No emojis or decorative UI icons
+
+The user does not want emojis or small decorative symbols in interfaces, buttons, labels, or chat-facing copy.
+
+## Do not use
+
+- Emoji in HTML/UI (e.g. chart, sparkle, file, checkmark emojis)
+- Emoji as stand-in for icons in upload zones, CTAs, or step headers
+- Decorative Unicode symbols meant to "prettify" the UI
+
+## Use instead
+
+- Plain Hebrew/English text only
+- CSS for layout, color, borders, and emphasis
+- Real image assets only when the user explicitly provides or requests them (e.g. GINI background)
+
+## Examples
+
+```html
+<!-- BAD -->
+<div class="zone-icon">📊</div>
+<button>✨ הורד קובץ</button>
+
+<!-- GOOD -->
+<div class="zone-title">לחצו לבחירת קובץ אקסל או CSV</div>
+<button>הורד Excel (.xlsx)</button>
+```
