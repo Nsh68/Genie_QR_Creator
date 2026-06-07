@@ -514,16 +514,64 @@
 
         function triggerDownload(blob, filename) {
             const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
+            const objectUrl = URL.createObjectURL(blob);
+            link.href = objectUrl;
             link.download = filename;
             link.click();
-            URL.revokeObjectURL(link.href);
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+        }
+
+        function canvasToPngBytes(canvas) {
+            const base64 = canvas.toDataURL('image/png').split(',')[1];
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes;
+        }
+
+        function normalizeMailtoUrl(url) {
+            let s = String(url).trim();
+            if (!/^mailto:/i.test(s)) return s;
+
+            // הסרת פרמטרים של Gmail compose שלא שייכים ל-mailto
+            s = s.replace(/[&?](?:utm_source|fs|tf)=[^&]*/gi, '');
+
+            const withoutScheme = s.replace(/^mailto:/i, '');
+            const splitIdx = withoutScheme.search(/[?&]/);
+
+            let addr;
+            let query;
+            if (splitIdx === -1) {
+                addr = withoutScheme;
+                query = '';
+            } else {
+                addr = withoutScheme.slice(0, splitIdx);
+                query = withoutScheme.slice(splitIdx);
+            }
+
+            addr = decodeURIComponent(addr.trim());
+            query = query.trim();
+
+            // תיקון: mailto:email&cc=... → mailto:email?cc=...
+            if (query.startsWith('&')) {
+                query = '?' + query.slice(1);
+            }
+
+            if (query) {
+                // Gmail לפעמים משתמש ב-su במקום subject
+                query = query.replace(/([?&])su=/gi, '$1subject=');
+            }
+
+            return 'mailto:' + addr + query;
         }
 
         function normalizeUrl(value) {
             const s = String(value).trim();
             if (!s) return '';
             if (/^https?:\/\//i.test(s)) return s;
+            if (/^mailto:/i.test(s)) return normalizeMailtoUrl(s);
             if (/^www\./i.test(s)) return 'https://' + s;
             if (/^[a-z0-9][-a-z0-9.]*\.[a-z]{2,}/i.test(s)) return 'https://' + s;
             return s;
@@ -532,7 +580,37 @@
         function isLikelyUrl(value) {
             if (value == null) return false;
             const normalized = normalizeUrl(value);
-            return /^https?:\/\//i.test(normalized);
+            return /^https?:\/\//i.test(normalized) || /^mailto:/i.test(normalized);
+        }
+
+        function extractPrimaryUrl(value) {
+            const text = String(value ?? '').trim();
+            if (!text) return '';
+            const parts = text.split(/[;\n\r]+/);
+            for (const part of parts) {
+                const candidate = normalizeUrl(part.trim());
+                if (candidate && isLikelyUrl(candidate)) return candidate;
+            }
+            const whole = normalizeUrl(text);
+            return whole && isLikelyUrl(whole) ? whole : '';
+        }
+
+        function padRow(row, colCount) {
+            const padded = row.map((v) => (v == null ? '' : v));
+            while (padded.length < colCount) padded.push('');
+            return padded;
+        }
+
+        function getUrlFromRow(rowData, preferredCol) {
+            const padded = padRow(rowData, headers.length);
+            let url = extractPrimaryUrl(padded[preferredCol]);
+            if (url) return url;
+            for (let c = 0; c < padded.length; c++) {
+                if (c === preferredCol) continue;
+                url = extractPrimaryUrl(padded[c]);
+                if (url) return url;
+            }
+            return '';
         }
 
         function detectUrlColumn(rows, headerRow) {
@@ -547,7 +625,7 @@
                     score += 5;
                 }
                 for (let r = 1; r < rows.length; r++) {
-                    if (isLikelyUrl(rows[r][c])) score++;
+                    if (extractPrimaryUrl(rows[r][c])) score++;
                 }
                 if (score > bestScore) {
                     bestScore = score;
@@ -630,21 +708,35 @@
             populateColumnSelect(pageColumnSelect, pageColumnIndex);
         }
 
+        const MAX_FILENAME_LENGTH = 180;
+
         function sanitizeDescriptionPart(value) {
             return String(value ?? '')
                 .trim()
+                .replace(/[\r\n\t]+/g, ' ')
+                .replace(/[\x00-\x1f\x7f]/g, '')
                 .replace(/_/g, ' ')
                 .replace(INVALID_FILENAME_CHARS, ' ')
                 .replace(/\s+/g, ' ')
+                .replace(/[.\s]+$/g, '')
                 .trim();
         }
 
         function sanitizePagePart(value) {
             return String(value ?? '')
                 .trim()
+                .replace(/[\r\n\t]+/g, ' ')
                 .replace(/,/g, '_')
                 .replace(INVALID_FILENAME_CHARS, '')
+                .replace(/[\x00-\x1f\x7f]/g, '')
+                .replace(/[.\s]+$/g, '')
                 .trim();
+        }
+
+        function truncateFilename(name) {
+            if (name.length <= MAX_FILENAME_LENGTH) return name;
+            const ext = '.png';
+            return name.slice(0, MAX_FILENAME_LENGTH - ext.length) + ext;
         }
 
         function buildQrFilename(description, page, rowNumber, usedNames) {
@@ -653,7 +745,9 @@
 
             let base;
             if (descPart && pagePart) {
-                base = `${descPart}_page_${pagePart}.png`;
+                base = truncateFilename(`${descPart}_page_${pagePart}.png`);
+            } else if (descPart) {
+                base = truncateFilename(`${descPart}.png`);
             } else {
                 base = `qr_row_${rowNumber + 1}.png`;
             }
@@ -671,6 +765,24 @@
             return filename;
         }
 
+        function buildZipEntryFilename(page, rowNumber, usedNames) {
+            const pagePart = sanitizePagePart(page)
+                .replace(/[^a-zA-Z0-9_\-]/g, '_')
+                .replace(/_+/g, '_')
+                .replace(/^_|_$/g, '') || String(rowNumber + 1);
+
+            let base = `qr_${String(rowNumber + 1).padStart(3, '0')}_page_${pagePart}.png`;
+            let filename = base;
+            let counter = 2;
+            while (usedNames.has(filename)) {
+                const dot = base.lastIndexOf('.');
+                filename = `${base.slice(0, dot)}_${counter}${base.slice(dot)}`;
+                counter++;
+            }
+            usedNames.add(filename);
+            return filename;
+        }
+
         function parseWorkbook(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -680,7 +792,26 @@
                         const workbook = XLSX.read(data, { type: 'array' });
                         const sheetName = workbook.SheetNames[0];
                         const sheet = workbook.Sheets[sheetName];
-                        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                        let rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                        const colCount = Math.max(...rows.map((r) => r.length), 0);
+                        rows = rows.map((r) => padRow(r, colCount));
+
+                        if (sheet['!ref']) {
+                            const range = XLSX.utils.decode_range(sheet['!ref']);
+                            for (let R = range.s.r; R <= range.e.r; R++) {
+                                if (!rows[R]) rows[R] = [];
+                                for (let C = range.s.c; C <= range.e.c; C++) {
+                                    const addr = XLSX.utils.encode_cell({ r: R, c: C });
+                                    const cell = sheet[addr];
+                                    if (!cell || !cell.l) continue;
+                                    const target = cell.l.Target || cell.l.target || '';
+                                    if (!target) continue;
+                                    while (rows[R].length <= C) rows[R].push('');
+                                    if (!String(rows[R][C] ?? '').trim()) rows[R][C] = target;
+                                }
+                            }
+                        }
+
                         resolve(rows);
                     } catch (err) {
                         reject(err);
@@ -691,14 +822,22 @@
             });
         }
 
-        function qrToCanvas(url, size) {
+        function qrToCanvas(url, size, errorCorrectionLevel) {
             return new Promise((resolve, reject) => {
                 const canvas = document.createElement('canvas');
-                QRCode.toCanvas(canvas, url, { width: size, margin: 2, errorCorrectionLevel: 'M' }, (err) => {
+                QRCode.toCanvas(canvas, url, { width: size, margin: 2, errorCorrectionLevel: errorCorrectionLevel || 'M' }, (err) => {
                     if (err) reject(err);
                     else resolve(canvas);
                 });
             });
+        }
+
+        async function qrToCanvasWithFallback(url, size) {
+            try {
+                return await qrToCanvas(url, size, 'M');
+            } catch (e) {
+                return await qrToCanvas(url, size, 'L');
+            }
         }
 
         async function buildTable() {
@@ -726,7 +865,7 @@
             const dataRows = sheetRows.slice(1);
 
             for (let r = 0; r < dataRows.length; r++) {
-                const rowData = dataRows[r];
+                const rowData = padRow(dataRows[r], headers.length);
                 const tr = document.createElement('tr');
 
                 headers.forEach((_, c) => {
@@ -739,11 +878,11 @@
 
                 const qrTd = document.createElement('td');
                 qrTd.className = 'qr-cell';
-                const url = normalizeUrl(rowData[urlColumnIndex]);
+                const url = getUrlFromRow(rowData, urlColumnIndex);
 
-                if (url && isLikelyUrl(url)) {
+                if (url) {
                     try {
-                        const canvas = await qrToCanvas(url, qrSize);
+                        const canvas = await qrToCanvasWithFallback(url, qrSize);
                         canvas.dataset.rowIndex = String(r);
                         qrTd.appendChild(canvas);
                         qrCanvases.push({ canvas, url, rowIndex: r });
@@ -793,8 +932,17 @@
                 dropZoneFile.textContent = file.name;
                 await regenerateQRCodes();
 
+                const generated = qrCanvases.length;
+                const total = sheetRows.length - 1;
+                const missing = total - generated;
+
                 setTimeout(() => {
-                    alert(`הטבלה נטענה.\nנוצרו קודי QR לשורות עם כתובת URL תקינה.\nניתן להוריד Excel, HTML, או ZIP של קבצי PNG.`);
+                    let msg = `הטבלה נטענה.\nנוצרו ${generated} קודי QR מתוך ${total} שורות.`;
+                    if (missing > 0) {
+                        msg += `\n\n${missing} שורות ללא קישור בעמודת ה-URL.\nיש למלא את עמודת הקישור בקובץ Excel (למשל "לינק מעודכן").`;
+                    }
+                    msg += '\n\nניתן להוריד Excel, HTML, או ZIP של קבצי PNG.';
+                    alert(msg);
                 }, 300);
             } catch (err) {
                 console.error(err);
@@ -946,7 +1094,7 @@ td.qr-cell img { display: block; margin: 0 auto; }
                 const qrCell = excelRow.getCell(qrColIndex + 1);
                 qrCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-                const url = normalizeUrl(dataRows[r][urlColumnIndex]);
+                const url = getUrlFromRow(padRow(dataRows[r], headers.length), urlColumnIndex);
                 const qrItem = qrCanvases.find((q) => q.rowIndex === r);
 
                 if (qrItem && url) {
@@ -971,24 +1119,42 @@ td.qr-cell img { display: block; margin: 0 auto; }
         downloadZipBtn.addEventListener('click', async function () {
             if (qrCanvases.length === 0) return;
 
-            const descCol = parseInt(descColumnSelect.value, 10);
-            const pageCol = parseInt(pageColumnSelect.value, 10);
-            const dataRows = sheetRows.slice(1);
-            const qrSize = parseInt(sizeSelect.value, 10);
-            const zip = new JSZip();
-            const usedNames = new Set();
+            downloadZipBtn.disabled = true;
+            downloadZipBtn.textContent = 'מכין ZIP...';
 
-            qrCanvases.forEach((item) => {
-                const rowData = dataRows[item.rowIndex];
-                const description = rowData[descCol];
-                const page = rowData[pageCol];
-                const filename = buildQrFilename(description, page, item.rowIndex, usedNames);
-                const base64Data = item.canvas.toDataURL('image/png').split(',')[1];
-                zip.file(filename, base64Data, { base64: true });
-            });
+            try {
+                const descCol = parseInt(descColumnSelect.value, 10);
+                const pageCol = parseInt(pageColumnSelect.value, 10);
+                const dataRows = sheetRows.slice(1);
+                const qrSize = parseInt(sizeSelect.value, 10);
+                const zip = new JSZip();
+                const usedNames = new Set();
+                const manifestLines = ['שם קובץ\tתיאור\tעמוד'];
 
-            const content = await zip.generateAsync({ type: 'blob' });
-            triggerDownload(content, `qr_codes_${qrSize}px.zip`);
+                qrCanvases.forEach((item) => {
+                    const rowData = padRow(dataRows[item.rowIndex], headers.length);
+                    const description = rowData[descCol];
+                    const page = rowData[pageCol];
+                    const filename = buildZipEntryFilename(page, item.rowIndex, usedNames);
+                    const pngBytes = canvasToPngBytes(item.canvas);
+                    zip.file(filename, pngBytes, { binary: true });
+
+                    const descText = String(description ?? '').replace(/[\r\n\t]+/g, ' ').trim();
+                    const pageText = String(page ?? '').replace(/[\r\n\t]+/g, ' ').trim();
+                    manifestLines.push(`${filename}\t${descText}\t${pageText}`);
+                });
+
+                zip.file('qr_file_names.txt', '\uFEFF' + manifestLines.join('\r\n'));
+
+                const content = await zip.generateAsync({ type: 'blob' });
+                triggerDownload(content, `qr_codes_${qrSize}px.zip`);
+            } catch (err) {
+                console.error(err);
+                alert('שגיאה ביצירת קובץ ה-ZIP. נסי שוב.');
+            } finally {
+                downloadZipBtn.disabled = false;
+                downloadZipBtn.textContent = 'הורד קודי QR כקבצים (ZIP)';
+            }
         });
     </script>
 
